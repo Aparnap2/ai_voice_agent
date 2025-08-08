@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     # Database settings
     DATABASE_URL: str = "sqlite:///./ai_calling_agent.db"
+    POSTGRES_URL: Optional[str] = None  # For LangGraph checkpoints
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # Salesforce settings

@@ -1,104 +1,53 @@
 """
-Pytest configuration and fixtures for AI Calling Agent tests.
+Test configuration and fixtures.
 """
-import asyncio
 import os
-from typing import AsyncGenerator, Generator
-
 import pytest
-import pytest_asyncio
-from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from unittest.mock import patch, MagicMock
 
-from app.core.config import get_settings
-from app.core.database import Base, get_async_session
+# Set test environment variables before importing app modules
+os.environ.update({
+    "ENVIRONMENT": "test",
+    "SECRET_KEY": "test-secret-key-32-characters-long",
+    "SALESFORCE_CLIENT_ID": "test_client_id",
+    "SALESFORCE_CLIENT_SECRET": "test_client_secret", 
+    "SALESFORCE_USERNAME": "test@example.com",
+    "SALESFORCE_PASSWORD": "test_password",
+    "SALESFORCE_SECURITY_TOKEN": "test_token",
+    "TWILIO_ACCOUNT_SID": "test_account_sid",
+    "TWILIO_AUTH_TOKEN": "test_auth_token",
+    "TWILIO_PHONE_NUMBER": "+1234567890",
+    "ELEVENLABS_API_KEY": "test_elevenlabs_key",
+    "OPENROUTER_API_KEY": "test_openrouter_key",
+    "ENCRYPTION_KEY": "test-encryption-key-32-chars-long"
+})
+
 from app.main import app
-
-
-# Set test environment
-os.environ["ENVIRONMENT"] = "test"
-os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///./test.db"
-
-
-@pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
-    """Create an instance of the default event loop for the test session."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
-    yield loop
-    loop.close()
-
-
-@pytest_asyncio.fixture(scope="session")
-async def test_engine():
-    """Create test database engine."""
-    settings = get_settings()
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///./test.db",
-        echo=False,
-    )
-    
-    # Create tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    
-    yield engine
-    
-    # Cleanup
-    await engine.dispose()
-    if os.path.exists("./test.db"):
-        os.remove("./test.db")
-
-
-@pytest_asyncio.fixture
-async def test_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
-    """Create test database session."""
-    TestSessionLocal = async_sessionmaker(
-        test_engine,
-        class_=AsyncSession,
-        expire_on_commit=False
-    )
-    
-    async with TestSessionLocal() as session:
-        yield session
+from app.core.config import get_settings
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def override_get_async_session(test_session):
-    """Override database session dependency."""
-    async def _override_get_async_session():
-        yield test_session
-    
-    app.dependency_overrides[get_async_session] = _override_get_async_session
-    yield
-    app.dependency_overrides.clear()
+def test_app():
+    """FastAPI test application."""
+    return app
 
 
 @pytest.fixture
-def client(override_get_async_session) -> TestClient:
-    """Create test client."""
+def test_settings():
+    """Test settings configuration."""
+    return get_settings()
+
+
+@pytest.fixture
+def client():
+    """FastAPI test client."""
     return TestClient(app)
 
 
-@pytest.fixture
-def mock_twilio_request():
-    """Mock Twilio webhook request data."""
-    return {
-        "From": "+1234567890",
-        "CallSid": "test-call-sid-123",
-        "To": "+1987654321",
-        "CallStatus": "in-progress"
-    }
-
-
-@pytest.fixture
-def mock_salesforce_lead():
-    """Mock Salesforce lead data."""
-    return {
-        "Id": "00Q123456789ABC",
-        "Name": "John Doe",
-        "Phone": "+1234567890",
-        "Email": "john.doe@example.com",
-        "Company": "Test Company",
-        "LeadSource": "AI_Calling_Agent",
-        "Status": "Open - Not Contacted"
-    }
+@pytest.fixture(autouse=True)
+def mock_external_services():
+    """Mock external services for all tests."""
+    with patch('app.services.salesforce.aiohttp.ClientSession'), \
+         patch('app.utils.encryption.get_encryption_manager'):
+        yield

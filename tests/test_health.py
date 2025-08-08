@@ -30,7 +30,7 @@ def test_health_endpoint_structure(client: TestClient):
     
     # Check services structure
     services = data["services"]
-    expected_services = ["database", "salesforce", "elevenlabs", "openrouter", "twilio"]
+    expected_services = ["database", "salesforce", "elevenlabs", "openrouter", "twilio", "llm_service"]
     
     for service in expected_services:
         assert service in services

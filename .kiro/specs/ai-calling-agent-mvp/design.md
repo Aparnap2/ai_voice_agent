@@ -2,11 +2,92 @@
 
 ## Overview
 
-The AI Calling Agent MVP is a production-ready autonomous sales system that combines intelligent prospect research, automated outbound calling, and advanced deal closing capabilities. The system automatically identifies high-value prospects, enriches their data through web crawling and LinkedIn research, and autonomously initiates sales conversations to close deals, identify bottlenecks, and capture qualified leads.
+The AI Calling Agent MVP is a cost-optimized, production-ready autonomous sales system that follows a **bounded autonomy** approach with strict budget controls and deterministic workflows. The system prioritizes rules-based decision making with selective LLM usage, ensuring predictable costs while maintaining intelligent prospect research, automated outbound calling, and deal closing capabilities.
 
-Built with production-grade security compliance (SOC 2, GDPR, CCPA), the system leverages modern AI technologies including ElevenLabs for speech processing, OpenRouter for LLM capabilities, and Twilio for telephony infrastructure. The architecture supports both inbound call handling and autonomous outbound prospecting with real-time performance, scalability, and enterprise-grade reliability.
+**Key Design Principles:**
+- **Rules-First Autonomy**: Deterministic logic handles clear cases; LLM reserved for ambiguous scenarios
+- **Budget-Controlled Operations**: Hard limits on external API calls (≤1 non-VIP, ≤2 VIP) and LLM usage (≤2 typical, ≤3 VIP)
+- **Template-First Conversations**: Pre-built response templates with selective LLM for complex objections
+- **Compliance-First Architecture**: DNC checking, consent validation, and comprehensive audit trails
+- **Performance SLAs**: p95 pre-dial latency ≤8s, STT ≤600ms, TTS ≤800ms
 
-The system serves as a comprehensive go-to-market (GTM) solution while demonstrating advanced AI integration capabilities, showcasing expertise in autonomous sales processes, data enrichment, voice AI, CRM integration, and security compliance.
+Built with production-grade security compliance (SOC 2, GDPR, CCPA), the system leverages cost-effective AI technologies including ElevenLabs for speech processing, OpenRouter with small models for selective LLM usage, and Twilio for telephony infrastructure. The architecture emphasizes caching, connection pooling, and resource optimization to minimize operational costs while maintaining enterprise-grade reliability.
+
+The system demonstrates advanced AI integration capabilities within strict cost boundaries, showcasing expertise in cost-controlled autonomous processes, efficient data enrichment, optimized voice AI, CRM integration, and security compliance.
+
+## Cost Control Architecture
+
+### Budget Enforcement Framework
+
+The system implements comprehensive budget controls at every level to ensure predictable costs and prevent runaway expenses:
+
+```mermaid
+graph TB
+    subgraph "Budget Control Layer"
+        BudgetController[Budget Controller]
+        CostTracker[Cost Tracker]
+        UsageMonitor[Usage Monitor]
+        BudgetGuards[Budget Guards]
+    end
+    
+    subgraph "External API Limits"
+        ExternalAPIs[External APIs]
+        APIGate[API Gateway]
+        RateLimit[Rate Limiter]
+        CircuitBreaker[Circuit Breaker]
+    end
+    
+    subgraph "LLM Usage Controls"
+        LLMService[LLM Service]
+        TokenCounter[Token Counter]
+        LLMGuard[LLM Guard]
+        CacheLayer[Cache Layer]
+    end
+    
+    subgraph "Caching Strategy"
+        EnrichmentCache[Enrichment Cache - 7d TTL]
+        ClassifierCache[Classifier Cache - 24h TTL]
+        PlanCache[Plan Cache - 24h TTL]
+        TTSCache[TTS Cache - 30d TTL]
+    end
+    
+    BudgetController --> APIGate
+    BudgetController --> LLMGuard
+    CostTracker --> UsageMonitor
+    UsageMonitor --> BudgetGuards
+    
+    APIGate --> RateLimit
+    RateLimit --> CircuitBreaker
+    CircuitBreaker --> ExternalAPIs
+    
+    LLMGuard --> TokenCounter
+    TokenCounter --> LLMService
+    LLMService --> CacheLayer
+    
+    CacheLayer --> EnrichmentCache
+    CacheLayer --> ClassifierCache
+    CacheLayer --> PlanCache
+    CacheLayer --> TTSCache
+```
+
+### Cost Control Specifications
+
+**External API Budget Limits:**
+- Non-VIP prospects: Maximum 1 external call per lead
+- VIP prospects: Maximum 2 external calls per lead
+- No retries on 4xx errors; maximum 2 retries on 5xx with exponential backoff
+
+**LLM Usage Budget Limits:**
+- Planner: 1 call per lead (cached 24h)
+- Runtime Non-VIP: Maximum 1 LLM call per conversation
+- Runtime VIP: Maximum 2-3 LLM calls per conversation
+- Token limits: Classifier ≤64, Planner ≤600, Runtime ≤80
+
+**Caching Strategy:**
+- Enrichment data: 7-day TTL, keyed by domain/company
+- Classifier results: 24-hour TTL, keyed by leadId
+- Call plans: 24-hour TTL, keyed by leadId + context hash
+- TTS audio: 30-day TTL, keyed by prompt hash
 
 ## Architecture
 
@@ -61,7 +142,7 @@ graph TB
     subgraph "AI Services"
         ElevenLabs[ElevenLabs STT/TTS]
         OpenRouter[OpenRouter API]
-        LangSmith[LangSmith Tracing]
+        langfuse[langfuse Tracing]
     end
     
     subgraph "Data Storage"
@@ -108,7 +189,7 @@ graph TB
     SecurityLayer --> ProspectDB
     SecurityLayer --> EncryptedStorage
     
-    LangSmith --> LangGraph
+    langfuse --> LangGraph
 ```
 
 ### LangGraph-Orchestrated Autonomous Workflow
@@ -266,7 +347,7 @@ sequenceDiagram
 - **Data Storage**: PostgreSQL with encryption at rest, Redis for caching
 - **Security**: HashiCorp Vault for secrets, AWS KMS for encryption keys
 - **Compliance**: SOC 2 Type II, GDPR, CCPA compliance frameworks
-- **Monitoring**: DataDog for APM, Sentry for error tracking, LangSmith for agent tracing
+- **Monitoring**: DataDog for APM, Sentry for error tracking, langfuse for agent tracing
 - **Deployment**: AWS ECS with auto-scaling, CloudFront CDN
 
 ## Components and Interfaces

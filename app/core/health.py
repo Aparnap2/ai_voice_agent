@@ -196,6 +196,35 @@ async def check_twilio_health() -> Dict[str, Any]:
         }
 
 
+async def check_llm_service_health() -> Dict[str, Any]:
+    """Check LLM service health and usage statistics."""
+    try:
+        from app.services.openrouter_llm import openrouter_llm_service
+        
+        # Get usage statistics
+        usage_stats = await openrouter_llm_service.get_token_usage_stats()
+        
+        # Check if service is accessible (basic validation)
+        active_sessions = len(openrouter_llm_service.active_sessions)
+        
+        return {
+            "status": "healthy",
+            "active_sessions": active_sessions,
+            "daily_tokens": usage_stats.get('daily_usage', {}).get('total_tokens', 0),
+            "daily_cost": usage_stats.get('daily_usage', {}).get('cost_estimate', 0.0),
+            "model_name": usage_stats.get('model_name', 'unknown'),
+            "details": "LLM service operational"
+        }
+        
+    except Exception as e:
+        logger.error("LLM service health check failed", error=str(e))
+        return {
+            "status": "unhealthy",
+            "error": str(e),
+            "details": "LLM service health check failed"
+        }
+
+
 async def perform_health_checks() -> Dict[str, Any]:
     """Perform all health checks and return comprehensive status."""
     start_time = time.time()
@@ -207,6 +236,7 @@ async def perform_health_checks() -> Dict[str, Any]:
         check_elevenlabs_health(),
         check_openrouter_health(),
         check_twilio_health(),
+        check_llm_service_health(),
         return_exceptions=True
     )
     
@@ -217,6 +247,7 @@ async def perform_health_checks() -> Dict[str, Any]:
         "elevenlabs": health_checks[2],
         "openrouter": health_checks[3],
         "twilio": health_checks[4],
+        "llm_service": health_checks[5],
     }
     
     # Handle any exceptions

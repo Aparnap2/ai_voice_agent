@@ -289,7 +289,7 @@ def get_encryption_manager() -> EncryptionManager:
     return _encryption_manager
 
 
-def encrypt_pii_data(data: Dict[str, Any]) -> Dict[str, Any]:
+async def encrypt_pii_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convenience function to encrypt PII data.
     
@@ -302,7 +302,7 @@ def encrypt_pii_data(data: Dict[str, Any]) -> Dict[str, Any]:
     return get_encryption_manager().encrypt_dict(data)
 
 
-def decrypt_pii_data(data: Dict[str, Any]) -> Dict[str, Any]:
+async def decrypt_pii_data(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Convenience function to decrypt PII data.
     

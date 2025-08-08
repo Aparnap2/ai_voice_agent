@@ -96,3 +96,42 @@ The AI Calling Agent MVP is a production-ready AI voice assistant that handles i
 4. WHEN call quality issues are detected THEN the system SHALL log audio quality metrics and transcription accuracy
 5. WHEN leads are qualified THEN the system SHALL track conversion rates from initial call to closed deals
 6. WHEN performance metrics are requested THEN the system SHALL provide real-time dashboards with key KPIs
+
+### Requirement 8: Cost Control and Budget Management
+
+**User Story:** As a business owner, I want strict cost controls and budget limits on all AI operations, so that I can predict and control operational expenses while maintaining system effectiveness.
+
+#### Acceptance Criteria
+
+1. WHEN processing non-VIP prospects THEN the system SHALL make maximum 1 external API call per lead
+2. WHEN processing VIP prospects THEN the system SHALL make maximum 2 external API calls per lead
+3. WHEN using LLM services THEN the system SHALL enforce token limits: classifier ≤64, planner ≤600, runtime ≤80
+4. WHEN making LLM calls THEN non-VIP prospects SHALL have maximum 1 runtime call, VIP prospects maximum 3
+5. WHEN external API calls fail with 4xx errors THEN the system SHALL NOT retry to avoid unnecessary costs
+6. WHEN cache hit rates fall below 30% THEN the system SHALL alert administrators for optimization
+
+### Requirement 9: Template-First Conversation Management
+
+**User Story:** As a conversation designer, I want the system to use pre-built templates for most interactions and only use LLM for complex scenarios, so that conversations are consistent and cost-effective.
+
+#### Acceptance Criteria
+
+1. WHEN handling common objections THEN the system SHALL use pre-built template responses
+2. WHEN encountering complex objections THEN the system SHALL use selective LLM with strict token limits
+3. WHEN generating call plans THEN the system SHALL cache plans for 24 hours to avoid regeneration
+4. WHEN synthesizing speech THEN the system SHALL cache TTS audio for 30 days for reuse
+5. WHEN template coverage is insufficient THEN the system SHALL escalate to human agents rather than unlimited LLM usage
+6. WHEN conversation exceeds maximum turns THEN the system SHALL gracefully transfer to human agents
+
+### Requirement 10: Rules-Based Decision Making
+
+**User Story:** As a system administrator, I want deterministic rules to handle clear-cut decisions and only use AI for ambiguous cases, so that system behavior is predictable and cost-controlled.
+
+#### Acceptance Criteria
+
+1. WHEN prospect data clearly indicates high/low value THEN the system SHALL use rules-based scoring without LLM
+2. WHEN prospect scoring falls in gray zone (45-55) THEN the system SHALL use small LLM classifier with 64 token limit
+3. WHEN enrichment confidence is low THEN the system SHALL proceed with CRM data only rather than additional API calls
+4. WHEN compliance violations are detected THEN the system SHALL automatically block calls without human intervention
+5. WHEN budget limits are reached THEN the system SHALL terminate workflows and alert administrators
+6. WHEN cache data is available THEN the system SHALL use cached results instead of making new API calls

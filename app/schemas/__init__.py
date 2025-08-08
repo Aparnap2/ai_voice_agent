@@ -22,6 +22,15 @@ from .salesforce import (
     SalesforceWebhookData, SalesforceAuthToken
 )
 
+from .llm import (
+    TokenUsageBase, TokenUsageResponse, LLMRequestBase, LLMRequestCreate,
+    LLMResponseBase, LLMResponseCreate, LLMResponseResponse,
+    ConversationAnalysisBase, ConversationAnalysisCreate, ConversationAnalysisResponse,
+    LeadScoringBase, LeadScoringCreate, LeadScoringResponse,
+    ConversationSessionBase, ConversationSessionCreate, ConversationSessionUpdate, ConversationSessionResponse,
+    LLMHealthCheck, LLMUsageStats, SafetyValidationResult
+)
+
 __all__ = [
     # Base schemas and utilities
     "BaseSchema", "TimestampMixin", "CallStatus", "CallOutcome", "ConversationRole",
@@ -40,4 +49,12 @@ __all__ = [
     "ContactBase", "ContactCreate", "ContactUpdate", "ContactResponse",
     "LeadBase", "LeadCreate", "LeadResponse", "TaskBase", "TaskCreate", "TaskResponse",
     "SalesforceWebhookData", "SalesforceAuthToken",
+    
+    # LLM schemas
+    "TokenUsageBase", "TokenUsageResponse", "LLMRequestBase", "LLMRequestCreate",
+    "LLMResponseBase", "LLMResponseCreate", "LLMResponseResponse",
+    "ConversationAnalysisBase", "ConversationAnalysisCreate", "ConversationAnalysisResponse",
+    "LeadScoringBase", "LeadScoringCreate", "LeadScoringResponse",
+    "ConversationSessionBase", "ConversationSessionCreate", "ConversationSessionUpdate", "ConversationSessionResponse",
+    "LLMHealthCheck", "LLMUsageStats", "SafetyValidationResult",
 ]
