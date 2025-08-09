@@ -56,6 +56,16 @@ class Settings(BaseSettings):
     # Encryption settings
     ENCRYPTION_KEY: str
     
+    # Approval and Notification settings
+    SLACK_WEBHOOK_URL: Optional[str] = None
+    SMTP_SERVER: Optional[str] = None
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: Optional[str] = None
+    SMTP_PASSWORD: Optional[str] = None
+    FROM_EMAIL: Optional[str] = None
+    APPROVER_EMAILS: Optional[List[str]] = None
+    BASE_URL: str = "http://localhost:8000"
+    
     @validator("ALLOWED_HOSTS", pre=True)
     def parse_allowed_hosts(cls, v):
         """Parse comma-separated allowed hosts."""
@@ -68,6 +78,13 @@ class Settings(BaseSettings):
         """Parse comma-separated allowed origins."""
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",")]
+        return v
+    
+    @validator("APPROVER_EMAILS", pre=True)
+    def parse_approver_emails(cls, v):
+        """Parse comma-separated approver emails."""
+        if isinstance(v, str):
+            return [email.strip() for email in v.split(",")]
         return v
     
     @validator("SECRET_KEY")

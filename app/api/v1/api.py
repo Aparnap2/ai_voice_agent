@@ -3,7 +3,7 @@ API v1 router configuration.
 """
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import webhooks, speech, llm, agents, research
+from app.api.v1.endpoints import webhooks, speech, llm, agents, research, approval, audit, outbound_calls, call_quality, objections
 
 api_router = APIRouter()
 
@@ -36,4 +36,34 @@ api_router.include_router(
     research.router,
     prefix="/research",
     tags=["research"]
+)
+
+api_router.include_router(
+    approval.router,
+    prefix="/approval",
+    tags=["approval"]
+)
+
+api_router.include_router(
+    audit.router,
+    prefix="/audit",
+    tags=["audit"]
+)
+
+api_router.include_router(
+    outbound_calls.router,
+    prefix="/outbound-calls",
+    tags=["outbound-calls"]
+)
+
+api_router.include_router(
+    call_quality.router,
+    prefix="/call-quality",
+    tags=["call-quality"]
+)
+
+api_router.include_router(
+    objections.router,
+    prefix="/objections",
+    tags=["objections"]
 )

@@ -8,6 +8,7 @@ import structlog
 
 from app.services.twilio_service import twilio_service
 from app.services.call_handler import call_handler
+from app.services.outbound_call_manager import outbound_call_manager
 
 logger = structlog.get_logger()
 router = APIRouter()
@@ -280,6 +281,162 @@ async def handle_call_status_update(
             error=str(e)
         )
         return PlainTextResponse(content="ERROR", media_type="text/plain")
+
+
+@router.post("/twilio/outbound/{task_id}")
+async def handle_outbound_call_webhook(
+    task_id: str,
+    request: Request,
+    CallSid: str = Form(...),
+    CallStatus: str = Form(...),
+    From: str = Form(...),
+    To: str = Form(...),
+    CallDuration: Optional[str] = Form(None),
+    RecordingUrl: Optional[str] = Form(None)
+) -> PlainTextResponse:
+    """Handle outbound call webhooks from Twilio."""
+    try:
+        # Extract webhook data
+        form_data = await request.form()
+        request._form_data = dict(form_data)
+        
+        # Validate webhook signature
+        if not twilio_service.validate_webhook_signature(request):
+            logger.warning(
+                "Invalid webhook signature for outbound call",
+                task_id=task_id,
+                call_sid=CallSid
+            )
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        
+        logger.info(
+            "Outbound call webhook received",
+            task_id=task_id,
+            call_sid=CallSid,
+            status=CallStatus,
+            duration=CallDuration
+        )
+        
+        # Parse duration
+        duration = None
+        if CallDuration:
+            try:
+                duration = int(CallDuration)
+            except ValueError:
+                pass
+        
+        # Handle status update
+        await outbound_call_manager.handle_call_status_update(
+            task_id=task_id,
+            call_sid=CallSid,
+            status=CallStatus,
+            duration=duration
+        )
+        
+        # Generate appropriate TwiML response based on call status
+        if CallStatus == "ringing":
+            # Call is ringing, wait for answer
+            twiml_response = twilio_service.create_greeting_response(To)
+        elif CallStatus == "in-progress":
+            # Call answered, start conversation
+            twiml_response = twilio_service.create_greeting_response(To)
+        else:
+            # Call completed, no response needed
+            twiml_response = "<?xml version='1.0' encoding='UTF-8'?><Response></Response>"
+        
+        return PlainTextResponse(content=twiml_response, media_type="application/xml")
+        
+    except Exception as e:
+        logger.error(
+            "Error handling outbound call webhook",
+            task_id=task_id,
+            call_sid=CallSid,
+            error=str(e)
+        )
+        
+        # Return empty response to avoid Twilio retries
+        return PlainTextResponse(
+            content="<?xml version='1.0' encoding='UTF-8'?><Response></Response>",
+            media_type="application/xml"
+        )
+
+
+@router.post("/twilio/outbound-conversation/{task_id}")
+async def handle_outbound_conversation(
+    task_id: str,
+    request: Request,
+    CallSid: str = Form(...),
+    From: str = Form(...),
+    To: str = Form(...),
+    SpeechResult: Optional[str] = Form(None),
+    Confidence: Optional[float] = Form(None),
+    RecordingUrl: Optional[str] = Form(None)
+) -> PlainTextResponse:
+    """Handle outbound call conversation turns."""
+    try:
+        # Extract webhook data
+        form_data = await request.form()
+        request._form_data = dict(form_data)
+        
+        # Validate webhook signature
+        if not twilio_service.validate_webhook_signature(request):
+            logger.warning(
+                "Invalid webhook signature for outbound conversation",
+                task_id=task_id,
+                call_sid=CallSid
+            )
+            raise HTTPException(status_code=401, detail="Invalid webhook signature")
+        
+        logger.info(
+            "Outbound conversation turn received",
+            task_id=task_id,
+            call_sid=CallSid,
+            speech_result=SpeechResult[:100] if SpeechResult else None,
+            confidence=Confidence
+        )
+        
+        # Process conversation turn using existing call handler
+        # The call handler will manage the conversation flow
+        ai_response, should_end_call, audio_data = await call_handler.process_conversation_turn(
+            call_sid=CallSid,
+            user_input=SpeechResult,
+            confidence=Confidence,
+            audio_url=RecordingUrl
+        )
+        
+        # Generate TwiML response
+        twiml_response = twilio_service.create_conversation_response(
+            user_speech=SpeechResult,
+            ai_response=ai_response,
+            should_end_call=should_end_call
+        )
+        
+        # Update outbound call manager if call should end
+        if should_end_call:
+            await outbound_call_manager.handle_call_status_update(
+                task_id=task_id,
+                call_sid=CallSid,
+                status="completed",
+                duration=None  # Duration will be provided by final status webhook
+            )
+        
+        return PlainTextResponse(content=twiml_response, media_type="application/xml")
+        
+    except Exception as e:
+        logger.error(
+            "Error handling outbound conversation",
+            task_id=task_id,
+            call_sid=CallSid,
+            error=str(e)
+        )
+        
+        # Return error response but continue call
+        error_response = twilio_service.create_conversation_response(
+            user_speech=SpeechResult,
+            ai_response="I'm sorry, I'm having technical difficulties. Let me transfer you to a human representative.",
+            should_end_call=True
+        )
+        return PlainTextResponse(content=error_response, media_type="application/xml")
 
 
 @router.post("/salesforce/lead-created")

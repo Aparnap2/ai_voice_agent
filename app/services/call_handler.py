@@ -22,6 +22,8 @@ from app.services.salesforce import get_salesforce_service
 from app.services.twilio_service import twilio_service
 from app.services.elevenlabs_service import elevenlabs_service
 from app.services.openrouter_llm import openrouter_llm_service
+from app.services.dialog_manager import dialog_manager
+from app.services.call_quality_monitor import call_quality_monitor
 from app.utils.encryption import encrypt_pii_data, decrypt_pii_data
 
 
@@ -130,6 +132,20 @@ class CallHandler:
                 self.active_sessions[call_sid] = context
                 self.session_timeouts[call_sid] = datetime.utcnow() + timedelta(minutes=30)
                 
+                # Start call quality monitoring
+                try:
+                    await call_quality_monitor.start_monitoring(call_sid)
+                    logger.info(
+                        "Call quality monitoring started",
+                        call_sid=call_sid
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to start call quality monitoring",
+                        call_sid=call_sid,
+                        error=str(e)
+                    )
+                
                 logger.info(
                     "Call session initialized",
                     call_sid=call_sid,
@@ -156,7 +172,8 @@ class CallHandler:
         call_sid: str,
         user_input: Optional[str],
         confidence: Optional[float] = None,
-        audio_url: Optional[str] = None
+        audio_url: Optional[str] = None,
+        audio_data: Optional[bytes] = None
     ) -> Tuple[str, bool, Optional[bytes]]:
         """
         Process a conversation turn and generate AI response with audio.
@@ -166,11 +183,15 @@ class CallHandler:
             user_input: User's speech input
             confidence: Speech recognition confidence
             audio_url: URL to audio recording
+            audio_data: Raw audio data for quality analysis
             
         Returns:
             Tuple of (AI response text, should_end_call, audio_data)
         """
         start_time = datetime.utcnow()
+        stt_start_time = start_time
+        response_generation_start = None
+        tts_start_time = None
         
         try:
             # Get or create conversation context
@@ -184,6 +205,21 @@ class CallHandler:
                         detail="Call session not found"
                     )
             
+            # Record audio metrics if audio data provided
+            if audio_data:
+                try:
+                    await call_quality_monitor.record_audio_metrics(
+                        call_sid=call_sid,
+                        audio_data=audio_data,
+                        sample_rate=8000
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to record audio metrics",
+                        call_sid=call_sid,
+                        error=str(e)
+                    )
+            
             # Enhanced transcription using ElevenLabs if audio_url provided
             enhanced_user_input = user_input
             if audio_url and not user_input:
@@ -193,12 +229,15 @@ class CallHandler:
                         language="en",
                         fallback_enabled=True
                     )
+                    stt_latency = (datetime.utcnow() - stt_start_time).total_seconds() * 1000
+                    
                     if enhanced_user_input:
                         logger.info(
                             "Enhanced transcription successful",
                             call_sid=call_sid,
                             original_length=len(user_input) if user_input else 0,
-                            enhanced_length=len(enhanced_user_input)
+                            enhanced_length=len(enhanced_user_input),
+                            stt_latency_ms=stt_latency
                         )
                     else:
                         enhanced_user_input = user_input
@@ -209,6 +248,9 @@ class CallHandler:
                         error=str(e)
                     )
                     enhanced_user_input = user_input
+                    stt_latency = (datetime.utcnow() - stt_start_time).total_seconds() * 1000
+            else:
+                stt_latency = 0.0  # No STT processing needed
             
             # Handle empty or unclear input
             if not enhanced_user_input or len(enhanced_user_input.strip()) < 2:
@@ -230,12 +272,16 @@ class CallHandler:
             context.add_turn(user_turn)
             
             # Generate AI response (placeholder for now)
+            response_generation_start = datetime.utcnow()
             ai_response, should_end = await self._generate_ai_response(
                 context, enhanced_user_input
             )
+            response_generation_time = (datetime.utcnow() - response_generation_start).total_seconds() * 1000
             
             # Generate audio for AI response
-            audio_data = await self._generate_response_audio(ai_response)
+            tts_start_time = datetime.utcnow()
+            response_audio_data = await self._generate_response_audio(ai_response)
+            tts_latency = (datetime.utcnow() - tts_start_time).total_seconds() * 1000
             
             # Store AI turn
             ai_turn = ConversationTurnCreate(
@@ -248,6 +294,27 @@ class CallHandler:
             
             await self._store_conversation_turn(ai_turn)
             context.add_turn(ai_turn)
+            
+            # Record performance metrics
+            try:
+                await call_quality_monitor.record_performance_metrics(
+                    call_sid=call_sid,
+                    stt_latency_ms=stt_latency,
+                    tts_latency_ms=tts_latency,
+                    response_generation_ms=response_generation_time,
+                    stt_confidence=confidence or 1.0,
+                    connection_quality=1.0  # Default, could be enhanced with Twilio metrics
+                )
+                
+                # Analyze call quality and apply optimizations
+                await call_quality_monitor.analyze_call_quality(call_sid)
+                
+            except Exception as e:
+                logger.warning(
+                    "Failed to record performance metrics",
+                    call_sid=call_sid,
+                    error=str(e)
+                )
             
             # Update session timeout
             self.session_timeouts[call_sid] = datetime.utcnow() + timedelta(minutes=30)
@@ -266,7 +333,7 @@ class CallHandler:
                 processing_time_ms=int((datetime.utcnow() - start_time).total_seconds() * 1000)
             )
             
-            return ai_response, should_end, audio_data
+            return ai_response, should_end, response_audio_data
             
         except Exception as e:
             logger.error(
@@ -347,9 +414,30 @@ class CallHandler:
                                 error=str(sf_error)
                             )
                 
+                # Stop call quality monitoring and get final report
+                try:
+                    quality_report = await call_quality_monitor.stop_monitoring(call_sid)
+                    if quality_report:
+                        logger.info(
+                            "Call quality monitoring completed",
+                            call_sid=call_sid,
+                            average_quality_score=quality_report.get("average_overall_score", 0.0),
+                            total_issues=quality_report.get("total_issues_detected", 0),
+                            total_optimizations=quality_report.get("total_optimizations_applied", 0)
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "Failed to stop call quality monitoring",
+                        call_sid=call_sid,
+                        error=str(e)
+                    )
+                
                 # Cleanup active session
                 self.active_sessions.pop(call_sid, None)
                 self.session_timeouts.pop(call_sid, None)
+                
+                # Cleanup dialog manager conversation
+                dialog_summary = await dialog_manager.end_conversation(call_sid, call_outcome)
                 
                 # Cleanup LLM session
                 await openrouter_llm_service.cleanup_session(call_sid)
@@ -409,61 +497,71 @@ class CallHandler:
         user_input: str
     ) -> Tuple[str, bool]:
         """
-        Generate AI response using OpenRouter LLM service.
+        Generate AI response using FSM-based Dialog Manager with template-first approach.
         """
         try:
-            # Get contact context from Salesforce if available
-            contact_context = {}
-            if context.extracted_information.get('contact_id'):
-                try:
-                    salesforce_service = await get_salesforce_service()
-                    contact_data = await salesforce_service.get_contact(
-                        context.extracted_information['contact_id']
-                    )
-                    if contact_data:
-                        contact_context = {
-                            'Name': contact_data.get('Name'),
-                            'Company': contact_data.get('Account', {}).get('Name'),
-                            'Industry': contact_data.get('Account', {}).get('Industry'),
-                            'Phone': contact_data.get('Phone'),
-                            'Email': contact_data.get('Email')
-                        }
-                except Exception as sf_error:
-                    logger.warning(
-                        "Failed to get contact context from Salesforce",
-                        call_sid=context.call_sid,
-                        error=str(sf_error)
-                    )
+            # Check if this is the first turn (start conversation)
+            if len(context.turns) <= 1:  # Only user input, no assistant response yet
+                # Get prospect data from Salesforce if available
+                prospect_data = {}
+                if context.extracted_information.get('contact_id'):
+                    try:
+                        salesforce_service = await get_salesforce_service()
+                        contact_data = await salesforce_service.get_contact(
+                            context.extracted_information['contact_id']
+                        )
+                        if contact_data:
+                            prospect_data = {
+                                'name': contact_data.get('Name'),
+                                'company': contact_data.get('Account', {}).get('Name'),
+                                'industry': contact_data.get('Account', {}).get('Industry'),
+                                'phone': contact_data.get('Phone'),
+                                'email': contact_data.get('Email'),
+                                'lead_score': 70  # Default score, could be enhanced
+                            }
+                    except Exception as sf_error:
+                        logger.warning(
+                            "Failed to get contact context from Salesforce",
+                            call_sid=context.call_sid,
+                            error=str(sf_error)
+                        )
+                
+                # Start conversation with dialog manager
+                response_text = await dialog_manager.start_conversation(
+                    call_sid=context.call_sid,
+                    prospect_data=prospect_data
+                )
+                
+                # For initial greeting, don't end call
+                should_end = False
+                
+                logger.info(
+                    "Started FSM-based conversation",
+                    call_sid=context.call_sid,
+                    response_length=len(response_text)
+                )
+                
+                return response_text, should_end
             
-            # Generate response using LLM service
-            response_text, tokens_used, analysis_data = await openrouter_llm_service.generate_response(
-                call_sid=context.call_sid,
-                user_input=user_input,
-                contact_context=contact_context,
-                conversation_context=context
-            )
-            
-            # Determine if call should end based on analysis
-            should_end = self._should_end_call(analysis_data, response_text)
-            
-            # Update context with analysis insights
-            if analysis_data.get('extracted_info'):
-                context.extracted_information.update(analysis_data['extracted_info'])
-            
-            logger.info(
-                "Generated LLM response",
-                call_sid=context.call_sid,
-                tokens_used=tokens_used,
-                response_length=len(response_text),
-                should_end=should_end,
-                analysis_signals=len(analysis_data.get('detected_signals', []))
-            )
-            
-            return response_text, should_end
+            else:
+                # Process conversation turn through dialog manager
+                response_text, should_end = await dialog_manager.process_turn(
+                    call_sid=context.call_sid,
+                    user_input=user_input
+                )
+                
+                logger.info(
+                    "Processed FSM conversation turn",
+                    call_sid=context.call_sid,
+                    response_length=len(response_text),
+                    should_end=should_end
+                )
+                
+                return response_text, should_end
             
         except Exception as e:
             logger.error(
-                "LLM response generation failed, using fallback",
+                "FSM dialog generation failed, using fallback",
                 call_sid=context.call_sid,
                 error=str(e)
             )

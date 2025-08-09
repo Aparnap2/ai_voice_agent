@@ -338,6 +338,36 @@ def generate_encryption_key() -> str:
     return Fernet.generate_key().decode('utf-8')
 
 
+async def encrypt_field(value: str) -> str:
+    """
+    Convenience function to encrypt a single field value.
+    
+    Args:
+        value: String value to encrypt
+        
+    Returns:
+        Encrypted string value
+    """
+    if not value:
+        return value
+    return get_encryption_manager().encrypt_string(value)
+
+
+async def decrypt_field(value: str) -> str:
+    """
+    Convenience function to decrypt a single field value.
+    
+    Args:
+        value: Encrypted string value to decrypt
+        
+    Returns:
+        Decrypted string value
+    """
+    if not value:
+        return value
+    return get_encryption_manager().decrypt_string(value)
+
+
 class EncryptedField:
     """
     Descriptor for automatically encrypting/decrypting model fields.
