@@ -57,3 +57,6 @@ pytz==2023.3
 
 # State machine for dialog management
 python-statemachine==2.3.6
+
+# System monitoring
+psutil==5.9.6

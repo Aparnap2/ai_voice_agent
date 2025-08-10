@@ -1,14 +1,15 @@
 """
-Database configuration and connection management.
+Database configuration and connection management with performance optimizations.
 """
 import asyncio
 from typing import AsyncGenerator
 
 import structlog
-from sqlalchemy import create_engine, MetaData
+from sqlalchemy import create_engine, MetaData, event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import QueuePool, StaticPool
 
 from app.core.config import get_settings
 
@@ -23,6 +24,9 @@ engine = None
 async_engine = None
 SessionLocal = None
 AsyncSessionLocal = None
+
+# Connection pool monitoring
+active_connections = 0
 
 
 def get_database_url(async_mode: bool = False) -> str:
@@ -40,25 +44,83 @@ def get_database_url(async_mode: bool = False) -> str:
     return db_url
 
 
+def get_pool_config(db_url: str) -> dict:
+    """Get optimized pool configuration based on database type."""
+    if "sqlite" in db_url:
+        return {
+            "poolclass": StaticPool,
+            "pool_pre_ping": True,
+            "connect_args": {
+                "check_same_thread": False,
+                "timeout": 20
+            }
+        }
+    else:
+        return {
+            "poolclass": QueuePool,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_pre_ping": True,
+            "pool_recycle": 3600,
+            "pool_timeout": 30
+        }
+
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    """Set SQLite pragmas for better performance."""
+    if "sqlite" in str(dbapi_connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA cache_size=10000")
+        cursor.execute("PRAGMA temp_store=MEMORY")
+        cursor.close()
+
+
+@event.listens_for(engine, "checkout")
+def track_connection_checkout(dbapi_connection, connection_record, connection_proxy):
+    """Track database connection checkout."""
+    global active_connections
+    active_connections += 1
+
+
+@event.listens_for(engine, "checkin")
+def track_connection_checkin(dbapi_connection, connection_record):
+    """Track database connection checkin."""
+    global active_connections
+    active_connections = max(0, active_connections - 1)
+
+
 async def init_db() -> None:
-    """Initialize database connections and create tables."""
+    """Initialize database connections and create tables with performance optimizations."""
     global engine, async_engine, SessionLocal, AsyncSessionLocal
     
     settings = get_settings()
     
     try:
-        # Create sync engine for migrations
+        sync_db_url = get_database_url(async_mode=False)
+        async_db_url = get_database_url(async_mode=True)
+        
+        # Get pool configuration
+        pool_config = get_pool_config(sync_db_url)
+        
+        # Create sync engine for migrations with connection pooling
         engine = create_engine(
-            get_database_url(async_mode=False),
+            sync_db_url,
             echo=settings.DEBUG,
-            pool_pre_ping=True,
+            **pool_config
         )
         
-        # Create async engine for application use
+        # Create async engine for application use with connection pooling
+        async_pool_config = pool_config.copy()
+        if "connect_args" in async_pool_config:
+            async_pool_config.pop("connect_args")  # Not supported in async
+        
         async_engine = create_async_engine(
-            get_database_url(async_mode=True),
+            async_db_url,
             echo=settings.DEBUG,
-            pool_pre_ping=True,
+            **async_pool_config
         )
         
         # Create session factories
@@ -78,7 +140,9 @@ async def init_db() -> None:
         async with async_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         
-        logger.info("Database initialized successfully")
+        logger.info("Database initialized successfully with connection pooling",
+                   pool_size=pool_config.get("pool_size", "static"),
+                   max_overflow=pool_config.get("max_overflow", "N/A"))
         
     except Exception as e:
         logger.error("Failed to initialize database", error=str(e))

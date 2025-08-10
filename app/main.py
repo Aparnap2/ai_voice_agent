@@ -45,6 +45,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("Sentry initialized", environment=settings.ENVIRONMENT)
     
+    # Initialize performance monitoring
+    from app.core.performance import performance_monitor
+    from app.core.cache import cache_manager
+    from app.core.background_tasks import task_queue
+    from app.services.monitoring import monitoring_service
+    
+    await performance_monitor.initialize()
+    await cache_manager.initialize()
+    await task_queue.start_workers()
+    await monitoring_service.start_monitoring()
+    logger.info("Performance monitoring, caching, and alerting initialized")
+    
     # Initialize database
     await init_db()
     logger.info("Database initialized")
@@ -54,6 +66,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
     
     # Cleanup
+    await monitoring_service.stop_monitoring()
+    await task_queue.stop_workers()
+    await cache_manager.close()
+    await performance_monitor.close()
     await close_db()
     logger.info("AI Calling Agent MVP shutdown complete")
 
@@ -70,6 +86,11 @@ def create_application() -> FastAPI:
         redoc_url="/redoc" if settings.ENVIRONMENT != "production" else None,
         lifespan=lifespan,
     )
+    
+    # Performance monitoring middleware
+    from app.middleware.performance import PerformanceMiddleware, CacheMiddleware
+    app.add_middleware(PerformanceMiddleware)
+    app.add_middleware(CacheMiddleware, cache_ttl=300)
     
     # Security middleware
     app.add_middleware(SecurityMiddleware)
